@@ -53,6 +53,19 @@ services:
       # Parsed at import time: edits need a container restart, not a reload.
       - "${DATA_DIR}/config/size_list_EN.csv:/app/demo/assets/size_list_EN.csv:ro"
 
+    # Generated photos must never be stored on atlas.
+    #
+    # The app writes every result to a per-request tempfile.mkdtemp() under /tmp,
+    # and gradio caches uploads under GRADIO_TEMP_DIR. Without this, /tmp is the
+    # container's writable layer - i.e. real files on atlas's disk - and they
+    # survive `docker compose restart`, accumulating indefinitely.
+    #
+    # Backing /tmp with tmpfs puts all of it in RAM: nothing is written to disk,
+    # and the whole lot is discarded every time the container is recreated or
+    # restarted. Size-capped so it cannot grow into the memory limit.
+    tmpfs:
+      - /tmp:mode=1777,size=512m
+
     restart: unless-stopped
 
     # python:3.10-slim ships no curl or wget, so the check is a Python one-liner.

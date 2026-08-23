@@ -65,12 +65,14 @@ COPY . .
 # Gradio needs a writable HOME and temp dir; both are set explicitly rather
 # than left to default to a path this user cannot write.
 RUN useradd --create-home --uid 10001 --shell /usr/sbin/nologin hivision \
-    && mkdir -p /var/tmp/gradio \
-    && chown -R hivision:hivision /app /var/tmp/gradio
+    && chown -R hivision:hivision /app
 
+# Both temp dirs sit under /tmp, which docker-compose.yml backs with tmpfs, so
+# generated photos and cached uploads live in RAM and never reach atlas's disk.
+# launch.py creates them at startup, since tmpfs mounts over anything baked here.
 ENV HOME=/home/hivision \
-    GRADIO_TEMP_DIR=/var/tmp/gradio \
-    MPLCONFIGDIR=/var/tmp/gradio \
+    GRADIO_TEMP_DIR=/tmp/gradio \
+    MPLCONFIGDIR=/tmp/mpl \
     PYTHONUNBUFFERED=1
 
 USER hivision

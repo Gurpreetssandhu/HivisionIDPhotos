@@ -260,6 +260,76 @@ DPI is written into the file metadata at export, not derived from the preset.
 
 ---
 
+## Generated photos are never stored on atlas
+
+**Policy: no photo produced by this service is written to atlas's disk.**
+
+The application writes every result to a per-request `tempfile.mkdtemp()` under
+`/tmp`, and gradio caches uploads under `GRADIO_TEMP_DIR`. By default `/tmp`
+inside a container is its *writable layer* — real files on the host disk — and
+those files survive `docker compose restart`, accumulating with every photo
+processed.
+
+`docker-compose.yml` therefore mounts `/tmp` as **tmpfs**:
+
+```yaml
+tmpfs:
+  - /tmp:mode=1777,size=512m
+```
+
+Consequences:
+
+- Photos exist in **RAM only**. Nothing is written to atlas's disk at any point.
+- Everything is **discarded on every restart or recreate** — `systemctl restart
+  hivision`, `docker compose restart`, `docker compose up -d`, or a reboot.
+- Capped at 512 MB so it cannot grow into the container's 4 GB memory limit.
+- Bonus: the mount is `nosuid,nodev,noexec`, so nothing dropped in `/tmp` can be
+  executed.
+
+`GRADIO_TEMP_DIR=/tmp/gradio` and `MPLCONFIGDIR=/tmp/mpl` both sit on that
+tmpfs. They are created by `deploy/atlas/launch.py` at startup rather than in
+the Dockerfile, because the tmpfs mount masks anything baked into the image at
+those paths.
+
+### Verifying
+
+```bash
+docker compose exec hivision findmnt -no FSTYPE,TARGET,OPTIONS /tmp
+```
+
+Must report `tmpfs`. If it ever reports nothing, `/tmp` has fallen back to the
+disk layer and photos are being written to atlas — check the `tmpfs:` block.
+
+To confirm nothing survives a refresh:
+
+```bash
+docker compose restart hivision && docker compose exec hivision find /tmp -name '*_300dpi*' | wc -l
+```
+
+Must print `0`.
+
+After a fresh start `/tmp/gradio` contains five images — `test0.jpg` through
+`test4.jpg`. Those are the repo's own bundled UI examples from `demo/images/`,
+which gradio copies into its cache to serve them; they are not user photos, and
+they are in RAM like everything else.
+
+### Checking the host is clean
+
+```bash
+find /home/gurusandhu/hivision -type f \( -iname '*.jpg' -o -iname '*.png' \) | grep -vE '/HivisionIDPhotos/(assets|demo|hivision)/'
+```
+
+Must print nothing. Anything listed is a stray file, not something the service
+created — the service cannot write there. (The paths excluded above are
+repo-tracked upstream assets and sample images.)
+
+### One thing this does not cover
+
+Photos the **client** downloads are on the downloading device, not atlas. That
+is outside this stack's control.
+
+---
+
 ## Updating from upstream
 
 `master` tracks `Zeyi-Lin/HivisionIDPhotos` and stays clean; all deployment
@@ -310,9 +380,8 @@ docker compose up -d --build
 ## Restoring from backup
 
 Nothing in this stack holds state worth backing up — no database, no volumes,
-and generated photos are written to a per-request `tempfile.mkdtemp()` inside
-the container and vanish with it. A full rebuild from the repo is the recovery
-path.
+and generated photos live only in a RAM-backed tmpfs that is wiped on every
+restart. A full rebuild from the repo is the recovery path.
 
 ```bash
 # 1. Repo
@@ -498,10 +567,9 @@ End-to-end test, US passport preset, modnet + retinaface, ~2.0 s total on CPU:
 /tmp/tmpXXXXXXXX/<ts>_layout_300dpi.png     1795x1205  dpi=300   <- print sheet
 ```
 
-Those paths are inside the container, under a per-request `tempfile.mkdtemp()`,
-and vanish with it. Copies of the test run were left on the host at
-`/home/gurusandhu/hivision/data/test-output/` — delete them whenever you like,
-they are outside the git tree.
+Those paths are inside the container on a **tmpfs**, so they never reach
+atlas's disk and are discarded on every restart. See
+[Generated photos are never stored on atlas](#generated-photos-are-never-stored-on-atlas).
 
 ---
 
@@ -594,4 +662,6 @@ Audited at commit `5c191e2`:
 - No `tailscale funnel`.
 - Nothing bound to `0.0.0.0`; Compose fails closed if `TAILSCALE_IP` is unset or empty.
 - No secrets, weights, generated photos or rendered env files in git.
+- No generated photo is ever written to atlas's disk; `/tmp` is tmpfs and is
+  wiped on every restart.
 - The six unrelated Compose stacks on atlas are never touched.

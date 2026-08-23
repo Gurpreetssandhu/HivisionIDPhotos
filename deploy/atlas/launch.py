@@ -64,6 +64,15 @@ def _launch(self, *args, **kwargs):
 
 gr.Blocks.launch = _launch
 
+# /tmp is a tmpfs mounted by docker-compose.yml, so it starts empty on every
+# container start and anything baked into the image at these paths is masked.
+# Create the temp dirs here rather than in the Dockerfile, where they would be
+# hidden by the mount. Keeping them on the tmpfs is what guarantees generated
+# photos are never written to atlas's disk and are gone after a restart.
+for _d in (os.environ.get("GRADIO_TEMP_DIR"), os.environ.get("MPLCONFIGDIR")):
+    if _d:
+        os.makedirs(_d, mode=0o700, exist_ok=True)
+
 # run_name="__main__" so app.py's `if __name__ == "__main__"` block executes,
 # and run_path sets __file__ to _APP so app.py's root_dir resolves to /app.
 runpy.run_path(_APP, run_name="__main__")
