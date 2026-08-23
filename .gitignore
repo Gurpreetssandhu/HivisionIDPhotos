@@ -28,3 +28,15 @@ test/temp/*
 # Ignore .png and .jpg files in the root directory
 /*.png
 /*.jpg
+
+# --- atlas deployment (deploy/atlas) ---
+# Rendered env files. The root `.env` rule above already matches these at any
+# depth; listed explicitly so the intent survives an upstream .gitignore change.
+deploy/atlas/.env
+deploy/atlas/*.env
+!deploy/atlas/.env.example
+
+# Model weights and generated photos live in $DATA_DIR outside the working
+# tree. These rules only matter if someone points DATA_DIR inside the repo.
+data/
+deploy/atlas/data/

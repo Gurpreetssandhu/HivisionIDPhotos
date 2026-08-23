@@ -1,0 +1,80 @@
+# HivisionIDPhotos - atlas deployment
+#
+# Reachable only over Tailscale. See deploy/atlas/README.md for the runbook.
+#
+# SECURITY NOTE ON THE TWO "0.0.0.0"s BELOW:
+#   `--host 0.0.0.0` binds Gradio to all interfaces *inside the container's own
+#   network namespace*. That namespace is a private bridge; it is not the host.
+#   The only thing that decides host-side exposure is the `ports:` mapping,
+#   which is pinned to ${TAILSCALE_IP}. Binding the container process to
+#   127.0.0.1 instead would make it unreachable even from the published port.
+#   Verify the real exposure with `ss -tlnp | grep 7860` on the host, never by
+#   reading this file.
+
+name: hivision
+
+services:
+  hivision:
+    build:
+      context: ../..
+      dockerfile: Dockerfile
+    image: hivision-idphotos:atlas
+    container_name: hivision
+    command: ["python3", "-u", "app.py", "--host", "0.0.0.0", "--port", "7860"]
+
+    # Host-side bind. ${TAILSCALE_IP} MUST be a literal Tailscale address -
+    # never 0.0.0.0, never empty (an empty value here silently expands to
+    # ":7860:7860", which binds all interfaces).
+    ports:
+      - "${TAILSCALE_IP:?TAILSCALE_IP is unset - refusing to start rather than bind 0.0.0.0}:${HOST_PORT:-7860}:7860"
+
+    environment:
+      # UI language. Read by demo/ui.py:31. One of: en, zh, ja, ko.
+      # An unrecognised value silently falls back to zh.
+      DEFAULT_LANG: "${DEFAULT_LANG:-en}"
+      # Only meaningful value is "beast" (keeps matting + face models resident
+      # in RAM). Empty = normal mode, models freed after each request.
+      RUN_MODE: "${RUN_MODE:-}"
+
+    volumes:
+      # Matting models. app.py raises at startup if this directory contains no
+      # .onnx/.mnn file, so a bad mount fails loudly rather than silently.
+      - "${DATA_DIR:?DATA_DIR is unset}/weights:/app/hivision/creator/weights:ro"
+      # RetinaFace weight lives in its own directory upstream.
+      - "${DATA_DIR}/weights/retinaface:/app/hivision/creator/retinaface/weights:ro"
+      # Size presets. NOTE the path: demo/locales.py sets base_dir=<repo>/demo
+      # and joins "assets/...", so the file the app actually reads is
+      # /app/demo/assets/size_list_EN.csv - NOT /app/assets/size_list_EN.csv.
+      # Parsed at import time: edits need a container restart, not a reload.
+      - "${DATA_DIR}/config/size_list_EN.csv:/app/demo/assets/size_list_EN.csv:ro"
+
+    restart: unless-stopped
+
+    # python:3.10-slim ships no curl or wget, so the check is a Python one-liner.
+    # start_period is generous: first request loads ONNX models on CPU.
+    healthcheck:
+      test:
+        - "CMD"
+        - "python3"
+        - "-c"
+        - "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:7860/', timeout=5).status == 200 else 1)"
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 90s
+
+    # atlas has 15Gi total and already runs six other stacks. 4g is comfortable
+    # for CPU ONNX inference in normal mode; raise to ~8g only for RUN_MODE=beast.
+    mem_limit: 4g
+    mem_reservation: 512m
+    cpus: 4.0
+
+    # atlas's / is at 82% used, so keep container logs bounded.
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+    security_opt:
+      - no-new-privileges:true

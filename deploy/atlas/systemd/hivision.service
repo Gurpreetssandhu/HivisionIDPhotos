@@ -1,0 +1,33 @@
+[Unit]
+Description=HivisionIDPhotos (Docker Compose stack, Tailscale-only)
+Documentation=https://github.com/Gurpreetssandhu/HivisionIDPhotos/blob/atlas-deploy/deploy/atlas/README.md
+Requires=docker.service
+After=docker.service network-online.target tailscaled.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+User=gurusandhu
+Group=gurusandhu
+WorkingDirectory=/home/gurusandhu/hivision/HivisionIDPhotos/deploy/atlas
+
+# Same .env Compose reads. Kept to plain KEY=value lines so systemd can parse it.
+EnvironmentFile=/home/gurusandhu/hivision/HivisionIDPhotos/deploy/atlas/.env
+
+# The port bind targets ${TAILSCALE_IP}, which does not exist on tailscale0
+# until tailscaled has come up and been assigned it. After=tailscaled.service
+# only orders unit *start*, not address assignment, so wait for the address
+# itself. Without this the stack loses a boot race and Compose fails with
+# "cannot assign requested address".
+ExecStartPre=/bin/bash -c 'for i in $(seq 1 60); do ip -4 addr show tailscale0 2>/dev/null | grep -qw "${TAILSCALE_IP}" && exit 0; sleep 2; done; echo "tailscale0 never got ${TAILSCALE_IP} (waited 120s)" >&2; exit 1'
+
+ExecStart=/usr/bin/docker compose up -d --remove-orphans
+ExecStop=/usr/bin/docker compose down
+ExecReload=/usr/bin/docker compose up -d --force-recreate
+
+# Image builds and model loading can be slow on a cold boot.
+TimeoutStartSec=0
+
+[Install]
+WantedBy=multi-user.target
