@@ -505,6 +505,89 @@ they are outside the git tree.
 
 ---
 
+## Security posture
+
+Re-run the scan after any upstream merge or base-image refresh:
+
+```bash
+docker run --rm -v /var/run/docker.sock:/var/run/docker.sock \
+  -v ~/.cache/trivy:/root/.cache/trivy \
+  aquasec/trivy:latest image --scanners vuln \
+  --severity CRITICAL,HIGH hivision-idphotos:atlas
+```
+
+### Where the CVE count went
+
+| Stage | Total | HIGH | CRITICAL |
+|---|---|---|---|
+| Upstream Dockerfile as-is | 647 | 200 | 7 |
+| after dropping unused `ffmpeg` | 272 | 76 | 5 |
+| after build-time `apt-get upgrade` | 206 | 42 | 5 |
+| after gradio 6 / pillow 12 / starlette 1.6 | **174** | **22** | **5** |
+
+Of the 174 remaining, **171 have no fix available** in Debian trixie. The other
+three are copies vendored inside pip (`pip/_vendor/`, listed in pip's
+`vendor.txt`, which trivy parses) — not importable, used only by pip during
+installation, unreachable from the application. **No runtime-reachable Python
+dependency CVE remains.**
+
+The five CRITICALs — `libglib2.0-0t64` (D-Bus XML introspection), `libxml2`
+(XML parsing), `perl-base` x3 — are all unfixed upstream and none sit on a code
+path this application uses. Nothing here parses XML, D-Bus, or runs perl.
+
+### Why ffmpeg is not installed
+
+Upstream installs it; this deployment does not. The code has **zero** video
+references, and `opencv-python` links its own statically-bundled ffmpeg from the
+wheel rather than the Debian package. Installing it added nine `libav*` packages
+carrying 117 HIGH CVEs with no fixes, for no functionality.
+
+If a future upstream version genuinely needs it, add it back — but re-measure.
+
+### Why gradio is floored at 6.15 rather than capped below 6
+
+Capping `gradio<6` is the obvious way to dodge the `show_api` crash, but gradio
+5.x hard-pins `pillow<12.0` and `starlette<1.0`, which holds back 15 HIGH fixes.
+The important one is **CVE-2026-42311 — arbitrary code execution via a malicious
+PSD file**. Gradio hands every upload straight to PIL, and this service accepts
+uploads from anyone on the tailnet, so that is a live path, not a theoretical
+one.
+
+`deploy/atlas/launch.py` adapts the one incompatible call instead. See its
+header. If you ever need to roll back to gradio 5, you are knowingly
+reintroducing those 15 CVEs.
+
+### Application code
+
+Audited at commit `5c191e2`:
+
+- No `eval`, `exec`, `os.system`, `subprocess`, `pickle`, or `yaml.load` anywhere.
+- Exactly one outbound network call — the Face++ POST at
+  `hivision/creator/face_detector.py:105`. It is **inert**: no API key is
+  configured, so the running service makes no outbound requests at all.
+- Gradio launches with `share=False` and no `auth`, as intended for a
+  Tailscale-only service. `launch.py` preserves upstream's `show_api=False` by
+  translating it to `footer_links=["gradio","settings"]`, so the API docs page
+  stays hidden.
+- The container runs as **uid 10001**, not root, with `no-new-privileges:true`.
+- Weights and the size-preset CSV are mounted **read-only**.
+
+### Accepted risks
+
+- **No authentication.** By design — Tailscale is the access control. Anyone on
+  the tailnet can use the service and upload arbitrary images. If the tailnet
+  ever includes devices you do not fully trust, revisit this.
+- **Base image pinned by digest.** Reproducible, but it does not pick up new
+  Debian security updates on its own. The build-time `apt-get upgrade`
+  compensates on each rebuild; refresh the digest deliberately (command in
+  `deploy/atlas/Dockerfile`).
+- **Upstream history contains leaked credentials.** gitleaks finds 17, all in
+  upstream commit `47225c57e` (2023) in files upstream later deleted. They came
+  with the fork. Not rewritten, because history surgery on `master` would break
+  the trivial-merge property.
+
+---
+
 ## Constraints this deployment respects
 
 - No firewall changes, no public ingress, no Cloudflare Tunnel — Tailscale only.
