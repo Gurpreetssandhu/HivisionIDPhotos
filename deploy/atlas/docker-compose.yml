@@ -23,7 +23,9 @@ services:
       dockerfile: deploy/atlas/Dockerfile
     image: hivision-idphotos:atlas
     container_name: hivision
-    command: ["python3", "-u", "app.py", "--host", "0.0.0.0", "--port", "7860"]
+    # launch.py, not app.py: a gradio 6 compatibility shim that then runs
+    # upstream's app.py unmodified. See deploy/atlas/launch.py.
+    command: ["python3", "-u", "deploy/atlas/launch.py", "--host", "0.0.0.0", "--port", "7860"]
 
     # Host-side bind. ${TAILSCALE_IP} MUST be a literal Tailscale address -
     # never 0.0.0.0, never empty (an empty value here silently expands to

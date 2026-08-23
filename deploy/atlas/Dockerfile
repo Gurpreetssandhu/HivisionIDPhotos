@@ -77,4 +77,6 @@ USER hivision
 
 EXPOSE 7860
 
-CMD ["python3", "-u", "app.py", "--host", "0.0.0.0", "--port", "7860"]
+# deploy/atlas/launch.py, not app.py: gradio 6 removed the show_api kwarg that
+# upstream still passes. See that file's header.
+CMD ["python3", "-u", "deploy/atlas/launch.py", "--host", "0.0.0.0", "--port", "7860"]

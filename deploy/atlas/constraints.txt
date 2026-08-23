@@ -2,14 +2,36 @@
 #
 # Applied with `pip install -c` so upstream's requirements.txt and
 # requirements-app.txt stay untouched and merges from upstream stay trivial.
-#
-# gradio: upstream pins `gradio>=4.43.0` with no upper bound. pip therefore
-# resolves gradio 6.x, which removed the `show_api` argument from
-# Blocks.launch(). app.py:73 passes it, so the container crash-loops with:
-#     TypeError: Blocks.launch() got an unexpected keyword argument 'show_api'
-# Cap below 6 until upstream adapts to the gradio 6 API.
-gradio>=4.43.0,<6
 
-# msgpack: transitive dependency with no upper bound from anything in the tree.
-# 1.1.2 carries a HIGH advisory fixed in 1.2.1. Unpinned, so free to raise.
+# gradio: upstream pins `gradio>=4.43.0` with no upper bound. Floor raised to
+# 6.15 rather than capped below 6, because gradio 5.x hard-pins `pillow<12.0`
+# and `starlette<1.0`, which blocks 15 HIGH CVE fixes (see below). 6.15 is the
+# first release fixing CVE-2026-48545 (cookie injection); it also carries the
+# fixes for CVE-2026-28416 (SSRF) and CVE-2026-28414 (path traversal).
+#
+# gradio 6 removed Blocks.launch(show_api=), which upstream's app.py:73 still
+# passes. deploy/atlas/launch.py adapts that one call - see its header.
+gradio>=6.15
+
+# pillow: 11.3.0 carries 13 HIGH advisories. The one that matters here is
+# CVE-2026-42311 - arbitrary code execution via a malicious PSD file - because
+# Gradio hands every upload to PIL, and this service accepts uploads from
+# anyone on the tailnet. 12.3.0 is the first release fixing all 13.
+pillow>=12.3.0
+
+# starlette: 0.52.1 carries CVE-2026-54283 (request.form() limits silently
+# ignored for urlencoded bodies -> DoS). Fixed in 1.3.1. Reachable only once
+# gradio no longer pins starlette<1.0.
+starlette>=1.3.1
+
+# msgpack: kept as a floor only. It was a transitive dependency under gradio 5;
+# gradio 6 no longer pulls it, so nothing installs it today and this line is a
+# no-op. Retained so a future dependency change cannot silently reintroduce the
+# vulnerable 1.1.2.
+#
+# NOTE: trivy will still report msgpack 1.1.2 and setuptools 70.3.0 against this
+# image. Those are copies vendored INSIDE pip (pip/_vendor/, listed in pip's
+# vendor.txt, which trivy parses). They are not importable, are used only by pip
+# during installation, and are unreachable from the running application. The
+# actually-installed setuptools is 84.0.0. Do not "fix" them by uninstalling pip.
 msgpack>=1.2.1
