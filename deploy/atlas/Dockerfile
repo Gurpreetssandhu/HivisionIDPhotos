@@ -26,14 +26,31 @@
 FROM python:3.10-slim@sha256:a78e4529630cfe8c5199cafd6e0c28ee1579a13f86274396d8b6b2d80367aa3a
 
 # libgl1 + libglib2.0-0: opencv-python's runtime deps.
-# ffmpeg: pulled in by upstream's Dockerfile; kept for parity.
-RUN apt-get update && apt-get install -y --no-install-recommends \
-        ffmpeg \
+#
+# ffmpeg is DELIBERATELY NOT INSTALLED, unlike upstream's Dockerfile. The code
+# has zero video/ffmpeg references (no VideoCapture, no imageio, no moviepy),
+# and opencv-python's wheel links its own statically-bundled ffmpeg rather than
+# the Debian package. Installing it pulled in nine libav*/ffmpeg packages
+# carrying 117 HIGH CVEs with no fix available upstream, for no functionality.
+# Verified after removal: cv2 imports, imread/imwrite work, and the full
+# matting -> face-detect -> layout pipeline produces identical output.
+# `apt-get upgrade` is normally an anti-pattern in a Dockerfile, but the base
+# is pinned by digest above, so without it the image is frozen at whatever
+# Debian shipped on that build date. It picks up published security updates -
+# at the time of writing, the util-linux family (bsdutils, libblkid1, libmount1,
+# libuuid1, login, mount, ...) carrying 36 HIGH CVEs fixed in 2.41.5-0+deb13u1.
+RUN apt-get update \
+    && apt-get upgrade -y \
+    && apt-get install -y --no-install-recommends \
         libgl1 \
         libglib2.0-0 \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
+
+# The base image ships pip 23.0.1 / setuptools 70.3.0 / wheel 0.45.1, all of
+# which carry advisories of their own (incl. the vendored jaraco.context).
+RUN pip install --no-cache-dir --upgrade pip setuptools wheel
 
 COPY requirements.txt requirements-app.txt ./
 COPY deploy/atlas/constraints.txt ./constraints.txt

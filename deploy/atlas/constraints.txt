@@ -9,3 +9,7 @@
 #     TypeError: Blocks.launch() got an unexpected keyword argument 'show_api'
 # Cap below 6 until upstream adapts to the gradio 6 API.
 gradio>=4.43.0,<6
+
+# msgpack: transitive dependency with no upper bound from anything in the tree.
+# 1.1.2 carries a HIGH advisory fixed in 1.2.1. Unpinned, so free to raise.
+msgpack>=1.2.1
