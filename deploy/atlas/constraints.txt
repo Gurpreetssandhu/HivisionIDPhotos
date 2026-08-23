@@ -1,0 +1,11 @@
+# pip constraints for the atlas deployment image.
+#
+# Applied with `pip install -c` so upstream's requirements.txt and
+# requirements-app.txt stay untouched and merges from upstream stay trivial.
+#
+# gradio: upstream pins `gradio>=4.43.0` with no upper bound. pip therefore
+# resolves gradio 6.x, which removed the `show_api` argument from
+# Blocks.launch(). app.py:73 passes it, so the container crash-loops with:
+#     TypeError: Blocks.launch() got an unexpected keyword argument 'show_api'
+# Cap below 6 until upstream adapts to the gradio 6 API.
+gradio>=4.43.0,<6

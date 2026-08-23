@@ -1,0 +1,10 @@
+# BuildKit reads <dockerfile>.dockerignore in preference to the context-root
+# .dockerignore, so this scopes cleanly to the atlas build and leaves upstream's
+# own CI (.github/workflows/build-image.yml, which builds from the repo root
+# AFTER downloading weights into hivision/creator/weights) completely alone.
+.git
+**/__pycache__
+**/*.pyc
+.devcontainer
+.vscode
+.history

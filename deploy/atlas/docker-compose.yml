@@ -17,7 +17,10 @@ services:
   hivision:
     build:
       context: ../..
-      dockerfile: Dockerfile
+      # NOT the repo-root Dockerfile: upstream's installs libgl1-mesa-glx,
+      # which Debian removed in trixie, so it no longer builds. See the header
+      # comment in deploy/atlas/Dockerfile.
+      dockerfile: deploy/atlas/Dockerfile
     image: hivision-idphotos:atlas
     container_name: hivision
     command: ["python3", "-u", "app.py", "--host", "0.0.0.0", "--port", "7860"]

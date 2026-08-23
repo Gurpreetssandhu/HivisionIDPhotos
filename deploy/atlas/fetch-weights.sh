@@ -36,11 +36,11 @@ mkdir -p "$matting_dir" "$retina_dir"
 # birefnet-v1-lite as "BiRefNet-general-bb_swin_v1_tiny-epoch_232.onnx", but
 # hivision/creator/choose_handler.py looks them up by the names below.
 models=(
-  "modnet_photographic_portrait_matting.onnx|$matting_dir|https://github.com/Zeyi-Lin/HivisionIDPhotos/releases/download/pretrained-model/modnet_photographic_portrait_matting.onnx|SHA_MODNET_PHOTO"
-  "hivision_modnet.onnx|$matting_dir|https://github.com/Zeyi-Lin/HivisionIDPhotos/releases/download/pretrained-model/hivision_modnet.onnx|SHA_HIVISION_MODNET"
-  "rmbg-1.4.onnx|$matting_dir|https://huggingface.co/briaai/RMBG-1.4/resolve/main/onnx/model.onnx?download=true|SHA_RMBG"
-  "birefnet-v1-lite.onnx|$matting_dir|https://github.com/ZhengPeng7/BiRefNet/releases/download/v1/BiRefNet-general-bb_swin_v1_tiny-epoch_232.onnx|SHA_BIREFNET"
-  "retinaface-resnet50.onnx|$retina_dir|https://github.com/Zeyi-Lin/HivisionIDPhotos/releases/download/pretrained-model/retinaface-resnet50.onnx|SHA_RETINAFACE"
+  "modnet_photographic_portrait_matting.onnx|$matting_dir|https://github.com/Zeyi-Lin/HivisionIDPhotos/releases/download/pretrained-model/modnet_photographic_portrait_matting.onnx|07c308cf0fc7e6e8b2065a12ed7fc07e1de8febb7dc7839d7b7f15dd66584df9"
+  "hivision_modnet.onnx|$matting_dir|https://github.com/Zeyi-Lin/HivisionIDPhotos/releases/download/pretrained-model/hivision_modnet.onnx|7e0cb9a2a841b426dd0daf1a788ec398dab059bc039041d62b15636c0783bc56"
+  "rmbg-1.4.onnx|$matting_dir|https://huggingface.co/briaai/RMBG-1.4/resolve/main/onnx/model.onnx?download=true|8cafcf770b06757c4eaced21b1a88e57fd2b66de01b8045f35f01535ba742e0f"
+  "birefnet-v1-lite.onnx|$matting_dir|https://github.com/ZhengPeng7/BiRefNet/releases/download/v1/BiRefNet-general-bb_swin_v1_tiny-epoch_232.onnx|5600024376f572a557870a5eb0afb1e5961636bef4e1e22132025467d0f03333"
+  "retinaface-resnet50.onnx|$retina_dir|https://github.com/Zeyi-Lin/HivisionIDPhotos/releases/download/pretrained-model/retinaface-resnet50.onnx|40f825cf7dd0a88b26fb61db9a3aaedc2cad35162091113f4017b3c26a4f792d"
 )
 
 sha_of() { sha256sum "$1" | cut -d' ' -f1; }
