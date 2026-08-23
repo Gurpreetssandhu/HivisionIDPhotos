@@ -1,0 +1,112 @@
+name: upstream-sync
+
+# Keeps this fork's `master` in step with Zeyi-Lin/HivisionIDPhotos.
+#
+# It never pushes to `master` and never auto-merges. When upstream has new
+# commits it force-updates a scratch branch (`upstream-sync/master`) to the
+# upstream tip and opens a single PR into `master` for review. Deployment work
+# lives on `atlas-deploy`, which is rebased/merged by hand after the PR lands.
+
+on:
+  schedule:
+    # Mondays 04:17 UTC. Off-the-hour to avoid GitHub's cron congestion.
+    - cron: '17 4 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: upstream-sync
+  cancel-in-progress: false
+
+env:
+  UPSTREAM_REPO: https://github.com/Zeyi-Lin/HivisionIDPhotos.git
+  UPSTREAM_BRANCH: master
+  SYNC_BRANCH: upstream-sync/master
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout fork
+        uses: actions/checkout@v4
+        with:
+          ref: master
+          fetch-depth: 0
+
+      - name: Fetch upstream
+        run: |
+          git remote add upstream "$UPSTREAM_REPO"
+          git fetch upstream "$UPSTREAM_BRANCH" --tags
+
+      - name: Check for new upstream commits
+        id: check
+        run: |
+          behind=$(git rev-list --count "HEAD..upstream/$UPSTREAM_BRANCH")
+          echo "behind=$behind" >> "$GITHUB_OUTPUT"
+          echo "upstream_sha=$(git rev-parse --short "upstream/$UPSTREAM_BRANCH")" >> "$GITHUB_OUTPUT"
+          if [ "$behind" -eq 0 ]; then
+            echo "master is up to date with upstream; nothing to do."
+          else
+            echo "master is $behind commit(s) behind upstream."
+          fi
+
+      - name: Build changelog
+        if: steps.check.outputs.behind != '0'
+        run: |
+          {
+            echo "Automated by \`.github/workflows/upstream-sync.yml\`."
+            echo
+            echo "\`master\` is **${{ steps.check.outputs.behind }}** commit(s) behind"
+            echo "[Zeyi-Lin/HivisionIDPhotos@${{ steps.check.outputs.upstream_sha }}](https://github.com/Zeyi-Lin/HivisionIDPhotos/commits/master)."
+            echo
+            echo '### New upstream commits'
+            echo
+            git log --no-merges --reverse --pretty='- [`%h`](https://github.com/Zeyi-Lin/HivisionIDPhotos/commit/%H) %s' \
+              "HEAD..upstream/$UPSTREAM_BRANCH" | head -100
+            echo
+            echo '---'
+            echo
+            echo '**Review before merging.** After this lands on `master`, update the deployment:'
+            echo
+            echo '```bash'
+            echo 'git checkout atlas-deploy && git merge master'
+            echo 'ssh atlas'
+            echo 'cd ~/hivision/HivisionIDPhotos && git pull'
+            echo 'cd deploy/atlas && docker compose up -d --build'
+            echo '```'
+            echo
+            echo 'Then re-check the pinned paths in `deploy/atlas/README.md` — upstream has'
+            echo 'moved `demo/assets/size_list_EN.csv` and the weights directories before.'
+          } > "$RUNNER_TEMP/pr-body.md"
+
+      - name: Update sync branch
+        if: steps.check.outputs.behind != '0'
+        run: |
+          git push --force origin "upstream/$UPSTREAM_BRANCH:refs/heads/$SYNC_BRANCH"
+
+      - name: Open or update PR
+        if: steps.check.outputs.behind != '0'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          title="Sync master with upstream (${{ steps.check.outputs.upstream_sha }})"
+          existing=$(gh pr list --base master --head "$SYNC_BRANCH" --state open --json number --jq '.[0].number')
+          if [ -n "$existing" ]; then
+            gh pr edit "$existing" --title "$title" --body-file "$RUNNER_TEMP/pr-body.md"
+            echo "Updated existing PR #$existing"
+          else
+            gh pr create \
+              --base master \
+              --head "$SYNC_BRANCH" \
+              --title "$title" \
+              --body-file "$RUNNER_TEMP/pr-body.md" \
+              --label upstream-sync 2>/dev/null \
+            || gh pr create \
+              --base master \
+              --head "$SYNC_BRANCH" \
+              --title "$title" \
+              --body-file "$RUNNER_TEMP/pr-body.md"
+          fi
