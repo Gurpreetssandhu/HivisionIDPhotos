@@ -285,7 +285,8 @@ upstream moves. It never auto-merges.
    ```
 
 After any upstream merge, re-check the three things upstream has moved before:
-the size-CSV path, the two weights directories, and the `DEFAULT_LANG` lookup.
+the size-CSV path, the two weights directories, and the `DEFAULT_LANG` lookup —
+and re-test the workarounds in **Known upstream breakages** below.
 
 To force a sync check now:
 
@@ -412,6 +413,95 @@ atlas at `http://100.67.158.108:8080`) is:
    rule.
 
 5. In the UI, switch **Face detection model** to `face++ (联网Online API)`.
+
+---
+
+## Known upstream breakages (and why deploy/atlas/ patches them)
+
+Upstream **cannot be built or run from source** as of commit `5c191e2`. Both
+fixes are confined to `deploy/atlas/` so `master` stays byte-identical to
+upstream and merges never conflict. Re-test both after every upstream merge —
+if upstream fixes one, delete the corresponding workaround.
+
+### 1. `libgl1-mesa-glx` no longer exists (build fails)
+
+```
+E: Package 'libgl1-mesa-glx' has no installation candidate
+... exit code: 100
+```
+
+`python:3.10-slim` now rebases on Debian trixie, which dropped that
+transitional package. `libgl1` provides the opencv runtime instead.
+
+**Workaround:** `deploy/atlas/Dockerfile` (used instead of the repo-root one).
+This is also why Docker Hub's `linzeyi/hivision_idphotos:v1.3.1` (Jan 2025) is
+still the newest published tag — nothing has built since.
+
+### 2. gradio 6 removed `Blocks.launch(show_api=)` (container crash-loops)
+
+```
+TypeError: Blocks.launch() got an unexpected keyword argument 'show_api'
+```
+
+`requirements-app.txt` pins `gradio>=4.43.0` with no upper bound, so pip
+resolves gradio 6.x while `app.py:73` still passes `show_api`.
+
+**Workaround:** `deploy/atlas/constraints.txt` caps `gradio<6`, applied with
+`pip install -c`. The running image resolves gradio 5.x, which logs a
+deprecation warning about `show_api` — that warning is expected, not a fault.
+
+To check whether upstream has fixed it:
+
+```bash
+docker compose exec hivision python3 -c "import gradio; print(gradio.__version__)"
+```
+
+### 3. `inference.py -t generate_layout_photos` crashes (CLI only — UI is fine)
+
+```
+ValueError: could not broadcast input array from shape (600,600,4) into shape (600,600,3)
+```
+
+`save_image_dpi_to_bytes` writes **PNG data into a `.jpg` filename**, so
+feeding an `idphoto` output back into the CLI's layout mode reads 4 channels
+that cannot broadcast into the 3-channel sheet canvas.
+
+**Not patched, because it does not affect this deployment.** The UI never takes
+this path — `demo/processor.py:372` passes an in-memory 3-channel array
+straight to `generate_layout_image`. Verified: the UI produces a 1795x1205
+sheet at 300 DPI. Only the standalone `inference.py` layout subcommand is
+affected.
+
+---
+
+## Verified state at deployment
+
+Recorded 2026-08-23, so a future reader can tell what changed.
+
+| Check | Result |
+|---|---|
+| `ss -tlnp` for 7860 | `LISTEN 0 4096 100.67.158.108:7860 0.0.0.0:*` |
+| From atlas, `http://10.0.0.188:7860` (LAN) | connection refused |
+| From atlas, `http://127.0.0.1:7860` | connection refused |
+| From atlas, `http://100.67.158.108:7860` | HTTP 200 |
+| From another tailnet host, LAN IP | connection refused (port 22 open from the same host, so the path itself works) |
+| From another tailnet host, Tailscale IP | HTTP 200 |
+| Container | `Up (healthy)` |
+| Six pre-existing stacks | untouched, uptimes unchanged |
+| gitleaks over full history | 17 findings, **all** in upstream commit `47225c57e` (2023) in files upstream has since deleted; **0** in this branch's commits |
+
+End-to-end test, US passport preset, modnet + retinaface, ~2.0 s total on CPU:
+
+```
+/tmp/tmpXXXXXXXX/<ts>_standard_300dpi.png   600x600    dpi=300
+/tmp/tmpXXXXXXXX/<ts>_hd_300dpi.png         600x601    dpi=300
+/tmp/tmpXXXXXXXX/<ts>_layout_300dpi.png     1795x1205  dpi=300   <- print sheet
+```
+
+Those paths are inside the container, under a per-request `tempfile.mkdtemp()`,
+and vanish with it. Copies of the test run were left on the host at
+`/home/gurusandhu/hivision/data/test-output/` — delete them whenever you like,
+they are outside the git tree.
 
 ---
 
