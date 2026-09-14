@@ -200,6 +200,7 @@ upstream's list plus two entries, moved to the top:
 
 | Preset | Pixels (H×W) | Notes |
 |---|---|---|
+| `Indian Embassy (630x810 px)` | 810 × 630 | Passport Seva spec: 630 **wide** × 810 **tall** |
 | `US passport 2x2in (600x600 @300DPI)` | 600 × 600 | 2 × 2 in at 300 DPI |
 | `UK / Schengen 35x45mm (@300DPI)` | 531 × 413 | 45 × 35 mm at 300 DPI |
 
@@ -303,6 +304,65 @@ head -c 12 IMG_7772.jpeg | xxd
 
 > The manylinux wheel bundles libheif, so no apt packages are required. Pillow
 > 12 handles AVIF natively, so only the HEIF opener needs registering.
+
+---
+
+## Indian passport / Passport Seva photos
+
+The Passport Seva portal (Indian Embassies and Consulates) states:
+
+> File supported: JPG/JPEG · Maximum size: 250 KB for Photograph, 100 KB for
+> Signature · Photograph Dimensions: 630*810 Pixels
+
+Use the **`Indian Embassy (630x810 px)`** preset in the Size List — it is the
+first entry, so it is what the dropdown lands on by default.
+
+Settings that produce a compliant file:
+
+| Control | Value |
+|---|---|
+| ID photo size options | **Size List** |
+| Size list | **Indian Embassy (630x810 px)** |
+| Background color | **White** |
+| Plugin | tick **JPEG Format** |
+| Set KB size | **Custom** → **240** |
+
+### Do not enter this as a custom size
+
+`630*810` is **width × height**, but the Height and Width boxes under
+**Custom(px)** are the other way round, and the app rejects any photo wider than
+it is tall:
+
+```
+The width should not be greater than the length; the length and width should
+not be less than 100, and no more than 1800.
+```
+
+If you do use Custom(px), it is **Height 810, Width 630**. The preset avoids the
+whole trap.
+
+### Why 240 KB and not 250
+
+The KB control does not cap the file — it pads it to **exactly** the target:
+
+| Target | Actual bytes | vs 250 KiB (256000) | vs 250 kB (250000) |
+|---|---|---|---|
+| 250 | 256,000 | ok | **over the limit** |
+| 240 | 245,760 | ok | ok |
+| 200 | 204,800 | ok | ok |
+
+Portals disagree about whether "250 KB" means 256,000 or 250,000 bytes. Setting
+**240** lands at 245,760 bytes, which is under both. Setting 250 produces a file
+that a 250,000-byte check will reject.
+
+### Verified output
+
+With the settings above, the standard photo comes out **JPEG, 630×810,
+245,760 bytes** — dimensions, format and size all compliant.
+
+> The **HD photo** output is PNG data with a `.jpeg` name (an upstream quirk —
+> see the layout note in *Known upstream breakages*). Upload the **standard**
+> photo, which is a real JPEG.
 
 ---
 
@@ -571,7 +631,26 @@ To check whether upstream has fixed it:
 docker compose exec hivision python3 -c "import gradio; print(gradio.__version__)"
 ```
 
-### 3. `inference.py -t generate_layout_photos` crashes (CLI only — UI is fine)
+### 3. Size-validation errors crash instead of showing the reason
+
+```
+ValueError: A function (process) didn't return enough output values
+            (needed: 8, returned: 7)
+```
+
+`demo/processor.py:674` `_create_error_response()` returns **7** values while
+`demo/ui.py` wires **8** outputs, and it puts the message in the *gallery* slot
+rather than the notification textbox. So any custom-size validation failure
+raises inside gradio and the UI shows a bare red **Error** badge — the actual
+reason ("The width should not be greater than the length…") never reaches the
+user.
+
+**Workaround:** `deploy/atlas/launch.py` replaces the method at startup with one
+that mirrors `_create_response()`'s ordering — 5 images, gallery, accordion,
+notification. Confirmed: the message now appears in the notification box and no
+traceback is logged.
+
+### 4. `inference.py -t generate_layout_photos` crashes (CLI only — UI is fine)
 
 ```
 ValueError: could not broadcast input array from shape (600,600,4) into shape (600,600,3)

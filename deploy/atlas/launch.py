@@ -92,6 +92,40 @@ except Exception as exc:  # noqa: BLE001 - never block startup over this
           "including iPhone photos named .jpeg - will fail to decode." % exc,
           flush=True)
 
+# Upstream bug: demo/processor.py's _create_error_response() returns 7 values
+# while demo/ui.py wires 8 outputs, and it puts the message in the GALLERY slot
+# rather than the notification textbox. So any custom-size validation failure
+# makes gradio raise
+#
+#   ValueError: A function (process) didn't return enough output values
+#               (needed: 8, returned: 7)
+#
+# and the UI shows a bare red "Error" badge instead of the actual reason - e.g.
+# "The width should not be greater than the length...". Users are left guessing.
+#
+# _create_response() returns, in order: 5 images, gallery, accordion,
+# notification. Mirror that exactly so the message lands where it belongs.
+try:
+    import gradio as _gr
+    from demo.locales import LOCALES as _LOCALES
+    from demo.processor import IDPhotoProcessor as _Processor
+
+    def _create_error_response(self, language, message=None):
+        msg = message or _LOCALES["size_mode"][language]["custom_size_eror"]
+        return [_gr.update(value=None) for _ in range(5)] + [
+            None,                                    # template gallery
+            _gr.update(visible=False),               # matting accordion
+            _gr.update(value=msg, visible=True),     # notification textbox
+        ]
+
+    _Processor._create_error_response = _create_error_response
+    print("[launch] patched _create_error_response: validation messages now "
+          "reach the notification box instead of raising", flush=True)
+except Exception as exc:  # noqa: BLE001 - never block startup over this
+    print("[launch] WARNING: could not patch _create_error_response (%s). "
+          "Custom-size validation errors will show as a bare 'Error'." % exc,
+          flush=True)
+
 # run_name="__main__" so app.py's `if __name__ == "__main__"` block executes,
 # and run_path sets __file__ to _APP so app.py's root_dir resolves to /app.
 runpy.run_path(_APP, run_name="__main__")
