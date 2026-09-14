@@ -1,0 +1,20 @@
+# Extra packages for the atlas deployment image, on top of upstream's
+# requirements.txt / requirements-app.txt. Kept separate so upstream's files
+# stay untouched and merges from upstream remain trivial.
+
+# HEIC/HEIF decoding. iPhones capture in HEIC by default, and they frequently
+# hand the file over with a .jpeg extension - the content is still HEIC (magic
+# bytes "ftypheic"). Pillow has no HEIC decoder of its own, so gradio's image
+# component fails at preprocess with:
+#
+#   PIL.UnidentifiedImageError: cannot identify image file '.../IMG_XXXX.jpeg'
+#   gradio.exceptions.ComponentProcessingError: Could not preprocess input
+#     component at index 0 (a `image` component)
+#
+# which surfaces in the UI as a generic error when Start is clicked. Since
+# photographing yourself on a phone is the primary way anyone uses an ID-photo
+# tool, HEIC support is effectively required rather than optional.
+#
+# The manylinux wheel bundles libheif, so no apt packages are needed.
+# Registered at startup by deploy/atlas/launch.py.
+pillow-heif>=1.7.0

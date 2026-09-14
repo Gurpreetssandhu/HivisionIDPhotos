@@ -73,6 +73,25 @@ for _d in (os.environ.get("GRADIO_TEMP_DIR"), os.environ.get("MPLCONFIGDIR")):
     if _d:
         os.makedirs(_d, mode=0o700, exist_ok=True)
 
+# Teach Pillow to decode HEIC/HEIF before any upload is handled. iPhones shoot
+# HEIC by default and often present it with a .jpeg extension, which Pillow
+# cannot open - gradio then fails at preprocess and the UI shows a generic
+# error when Start is clicked. Registering the opener here rather than patching
+# upstream keeps app.py untouched.
+#
+# Guarded: if the package is ever missing, the service still starts and handles
+# JPEG/PNG normally, with a loud line in the logs rather than a crash-loop.
+try:
+    import pillow_heif
+
+    pillow_heif.register_heif_opener()
+    print("[launch] pillow-heif %s registered: HEIC/HEIF uploads supported"
+          % pillow_heif.__version__, flush=True)
+except Exception as exc:  # noqa: BLE001 - never block startup over this
+    print("[launch] WARNING: pillow-heif unavailable (%s). HEIC uploads - "
+          "including iPhone photos named .jpeg - will fail to decode." % exc,
+          flush=True)
+
 # run_name="__main__" so app.py's `if __name__ == "__main__"` block executes,
 # and run_path sets __file__ to _APP so app.py's root_dir resolves to /app.
 runpy.run_path(_APP, run_name="__main__")

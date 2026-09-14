@@ -260,6 +260,52 @@ DPI is written into the file metadata at export, not derived from the preset.
 
 ---
 
+## Uploads: HEIC / iPhone photos
+
+iPhones capture in **HEIC** by default, and iOS frequently hands the file over
+with a **`.jpeg` extension while the content is still HEIC** (magic bytes
+`ftypheic` at offset 4). Pillow ships no HEIC decoder, so gradio fails while
+preprocessing the upload and the UI shows a generic error the moment you press
+**Start**. In the logs it looks like this:
+
+```
+PIL.UnidentifiedImageError: cannot identify image file '/tmp/gradio/.../IMG_7772.jpeg'
+gradio.exceptions.ComponentProcessingError: Could not preprocess input component
+  at index 0 (a `image` component) of the event handler (named "process")
+```
+
+This deployment installs **`pillow-heif`** (`deploy/atlas/requirements-deploy.txt`)
+and registers the decoder at startup in `deploy/atlas/launch.py`, before any
+upload is handled. Confirm it is active:
+
+```bash
+docker compose logs hivision | grep pillow-heif
+```
+
+Expected:
+
+```
+[launch] pillow-heif 1.7.0 registered: HEIC/HEIF uploads supported
+```
+
+If instead you see the `WARNING: pillow-heif unavailable` line, the package did
+not install — HEIC uploads will fail while JPEG and PNG keep working. The
+registration is deliberately guarded so a missing package degrades rather than
+crash-loops the service.
+
+To check what a file really is, rather than trusting its extension:
+
+```bash
+head -c 12 IMG_7772.jpeg | xxd
+```
+
+`ftypheic` or `ftypmif1` means HEIC regardless of what the name says.
+
+> The manylinux wheel bundles libheif, so no apt packages are required. Pillow
+> 12 handles AVIF natively, so only the HEIF opener needs registering.
+
+---
+
 ## Generated photos are never stored on atlas
 
 **Policy: no photo produced by this service is written to atlas's disk.**

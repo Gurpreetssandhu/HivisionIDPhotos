@@ -54,9 +54,14 @@ RUN pip install --no-cache-dir --upgrade pip setuptools wheel
 
 COPY requirements.txt requirements-app.txt ./
 COPY deploy/atlas/constraints.txt ./constraints.txt
+COPY deploy/atlas/requirements-deploy.txt ./requirements-deploy.txt
 # -c applies upper bounds upstream omitted, without editing their requirements
-# files. See constraints.txt for why each pin is there.
-RUN pip install --no-cache-dir -c constraints.txt -r requirements.txt -r requirements-app.txt
+# files. See constraints.txt for why each pin is there, and
+# requirements-deploy.txt for what this deployment adds (HEIC support).
+RUN pip install --no-cache-dir -c constraints.txt \
+        -r requirements.txt \
+        -r requirements-app.txt \
+        -r requirements-deploy.txt
 
 COPY . .
 
