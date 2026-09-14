@@ -366,6 +366,42 @@ With the settings above, the standard photo comes out **JPEG, 630×810,
 
 ---
 
+## Output size is shown after processing
+
+When a photo finishes, the **Output size** box on the right reports what was
+produced:
+
+```
+Standard: 630 x 810 px | JPEG | 240.0 KB (245,760 bytes)
+HD: 630 x 812 px | PNG | 329.5 KB (337,411 bytes)
+Layout: 1795 x 1205 px | PNG | 364.2 KB (372,978 bytes)
+```
+
+Both KB and the exact byte count are given, because portals disagree about
+whether "KB" means 1024 or 1000 bytes — the byte figure is the one to check
+against a hard limit.
+
+This reuses the `notification` textbox that `demo/ui.py:376` already wires as
+the 8th output but only ever uses for errors (upstream sends
+`gr.update(visible=False)` on success). `deploy/atlas/launch.py` patches
+`_create_response` at startup to fill it in and grow the box to fit; the error
+path still uses the same box, relabelled. Upstream files are untouched.
+
+Confirm it is active:
+
+```bash
+docker compose logs hivision | grep "output size"
+```
+
+Expected: `[launch] patched _create_response: output size shown after processing`
+
+> **The HD output is PNG data with a `.jpeg` filename** — an upstream quirk (see
+> *Known upstream breakages*). The size box reports the real format, so you can
+> see at a glance which file is genuinely a JPEG. For Passport Seva, upload the
+> **Standard** photo.
+
+---
+
 ## Generated photos are never stored on atlas
 
 **Policy: no photo produced by this service is written to atlas's disk.**

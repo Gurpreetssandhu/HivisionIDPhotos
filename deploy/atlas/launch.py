@@ -115,7 +115,8 @@ try:
         return [_gr.update(value=None) for _ in range(5)] + [
             None,                                    # template gallery
             _gr.update(visible=False),               # matting accordion
-            _gr.update(value=msg, visible=True),     # notification textbox
+            # label set explicitly: the success path relabels this same box
+            _gr.update(value=msg, visible=True, label="notification"),
         ]
 
     _Processor._create_error_response = _create_error_response
@@ -125,6 +126,79 @@ except Exception as exc:  # noqa: BLE001 - never block startup over this
     print("[launch] WARNING: could not patch _create_error_response (%s). "
           "Custom-size validation errors will show as a bare 'Error'." % exc,
           flush=True)
+
+# Show the size of each generated photo once processing finishes.
+#
+# demo/ui.py:376 defines a `notification` gr.Text that is wired as the 8th
+# output but only ever used for errors - on success upstream sends
+# gr.update(visible=False) and the box stays hidden. Reuse it to report the
+# pixel dimensions, format and file size of what was produced, which is what
+# you need before uploading to a portal with a hard KB limit (Passport Seva
+# caps photographs at 250 KB).
+#
+# Patching _create_response here rather than editing demo/processor.py keeps
+# upstream files untouched so merges stay trivial.
+try:
+    import gradio as _gr2
+    from demo.processor import IDPhotoProcessor as _Proc2
+    from PIL import Image as _PILImage
+
+    def _describe(label, obj):
+        """Return 'Label: 630 x 810 px | JPEG | 240.0 KB (245,760 bytes)' or None."""
+        path = obj.get("value") if isinstance(obj, dict) else obj
+        if not isinstance(path, str) or not os.path.isfile(path):
+            return None
+        try:
+            nbytes = os.path.getsize(path)
+        except OSError:
+            return None
+        dims = fmt = "?"
+        try:
+            with _PILImage.open(path) as im:
+                dims = "%d x %d px" % (im.size[0], im.size[1])
+                fmt = im.format or "?"
+        except Exception:  # noqa: BLE001 - a description must never break output
+            pass
+        return "%s: %s | %s | %.1f KB (%s bytes)" % (
+            label, dims, fmt, nbytes / 1024.0, format(nbytes, ",d"))
+
+    def _create_response(self, result_image_standard, result_image_hd,
+                         result_image_standard_png, result_image_hd_png,
+                         result_layout_image_gr, result_image_template_gr,
+                         result_image_template_accordion_gr):
+        lines = [d for d in (
+            _describe("Standard", result_image_standard),
+            _describe("HD", result_image_hd),
+            _describe("Layout", result_layout_image_gr),
+        ) if d]
+
+        if lines:
+            # demo/ui.py:376 declares this as a 1-line gr.Text, so grow it to
+            # fit however many lines we produced - otherwise the size report is
+            # clipped to the first entry.
+            note = _gr2.update(value="\n".join(lines), visible=True,
+                               label="Output size",
+                               lines=len(lines), max_lines=len(lines))
+        else:
+            note = _gr2.update(visible=False)
+
+        return [
+            result_image_standard,
+            result_image_hd,
+            result_image_standard_png,
+            result_image_hd_png,
+            result_layout_image_gr,
+            result_image_template_gr,
+            result_image_template_accordion_gr,
+            note,
+        ]
+
+    _Proc2._create_response = _create_response
+    print("[launch] patched _create_response: output size shown after processing",
+          flush=True)
+except Exception as exc:  # noqa: BLE001 - never block startup over this
+    print("[launch] WARNING: could not patch _create_response (%s). "
+          "Output sizes will not be displayed." % exc, flush=True)
 
 # run_name="__main__" so app.py's `if __name__ == "__main__"` block executes,
 # and run_path sets __file__ to _APP so app.py's root_dir resolves to /app.
