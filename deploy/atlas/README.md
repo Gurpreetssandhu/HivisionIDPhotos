@@ -341,28 +341,38 @@ not be less than 100, and no more than 1800.
 If you do use Custom(px), it is **Height 810, Width 630**. The preset avoids the
 whole trap.
 
-### Why 240 KB and not 250
+### The KB control is a ceiling here, not a target
 
-The KB control does not cap the file — it pads it to **exactly** the target:
+Upstream treats "Set KB size" as an exact target: it compresses until the JPEG
+fits, then pads the file back up with null bytes appended **after** the JPEG
+end-of-image marker. On a 630×810 photo asking for 240 KB, the real image was
+85,289 bytes and the file written was 245,760 — **160,471 bytes of zeros, 65 %
+of the file.** Desktop viewers ignore trailing bytes; strict server-side
+validators such as Passport Seva's upload check reject the file, which shows up
+as a size error even though the number looks fine.
 
-| Target | Actual bytes | vs 250 KiB (256000) | vs 250 kB (250000) |
-|---|---|---|---|
-| 250 | 256,000 | ok | **over the limit** |
-| 240 | 245,760 | ok | ok |
-| 200 | 204,800 | ok | ok |
+`deploy/atlas/launch.py` patches `resize_image_to_kb` so the value is a
+**maximum**: compress to fit, then stop, with nothing after the EOI marker.
 
-Portals disagree about whether "250 KB" means 256,000 or 250,000 bytes. Setting
-**240** lands at 245,760 bytes, which is under both. Setting 250 produces a file
-that a 250,000-byte check will reject.
+| | upstream | this deployment |
+|---|---|---|
+| file size at a 240 KB target | 245,760 B | **85,289 B** |
+| trailing null padding | 160,471 B | **0** |
+| valid to a strict validator | no | **yes** |
+
+So the setting no longer needs careful tuning — 240 or 250 both produce the same
+~83 KB file, comfortably under either reading of "250 KB". Padding only helps a
+portal that enforces a *minimum* size; if you ever need that back, delete the
+patch block in `launch.py`.
 
 ### Verified output
 
-With the settings above, the standard photo comes out **JPEG, 630×810,
-245,760 bytes** — dimensions, format and size all compliant.
+With the settings above the standard photo comes out **JPEG, 630×810, 85,289
+bytes, with no trailing bytes after the EOI marker** — dimensions, format and
+size all compliant under either definition of "250 KB".
 
-> The **HD photo** output is PNG data with a `.jpeg` name (an upstream quirk —
-> see the layout note in *Known upstream breakages*). Upload the **standard**
-> photo, which is a real JPEG.
+Upload the **Standard** photo. HD is 630×812 (one pixel taller) and Layout is
+the print sheet; neither matches the required dimensions.
 
 ---
 
@@ -686,7 +696,34 @@ that mirrors `_create_response()`'s ordering — 5 images, gallery, accordion,
 notification. Confirmed: the message now appears in the notification box and no
 traceback is logged.
 
-### 4. `inference.py -t generate_layout_photos` crashes (CLI only — UI is fine)
+
+### 5. Downloaded Layout and HD photos are corrupt
+
+`hivision/utils.py:23` `save_image_dpi_to_bytes()` hardcodes `format="PNG"`:
+
+```python
+image.save(byte_stream, format="PNG", dpi=(dpi, dpi))
+```
+
+but `demo/processor.py:_save_image()` builds the **filename** from the "JPEG
+Format" plugin flag. With that ticked, the layout and HD files are named
+`.jpeg` while containing PNG bytes (`89504e47`). Preview reports *"could not be
+opened — it may be damaged"*, and portals reject them.
+
+The standard photo escapes this only because it goes through
+`resize_image_to_kb()`, a real JPEG encoder.
+
+**Workaround:** `deploy/atlas/launch.py` replaces the function with one that
+picks the format from the output path's extension. Safe for every caller — the
+only ones consuming the returned *bytes* are in `deploy_api.py` and all pass
+`output_image_path=None`, which still yields PNG.
+
+> Both `hivision.utils` **and** `demo.processor` bindings are replaced:
+> `processor.py` does `from hivision.utils import save_image_dpi_to_bytes`, so
+> patching the module alone would be a no-op. The same applies to
+> `resize_image_to_kb`.
+
+### 6. `inference.py -t generate_layout_photos` crashes (CLI only — UI is fine)
 
 ```
 ValueError: could not broadcast input array from shape (600,600,4) into shape (600,600,3)

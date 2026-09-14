@@ -200,6 +200,130 @@ except Exception as exc:  # noqa: BLE001 - never block startup over this
     print("[launch] WARNING: could not patch _create_response (%s). "
           "Output sizes will not be displayed." % exc, flush=True)
 
+# Upstream bug: downloaded Layout (and HD) photos are corrupt.
+#
+# hivision/utils.py:23 save_image_dpi_to_bytes() hardcodes format="PNG":
+#
+#     image.save(byte_stream, format="PNG", dpi=(dpi, dpi))
+#
+# but demo/processor.py:_save_image() builds the FILENAME from the "JPEG Format"
+# plugin flag. So with that option ticked the layout and HD files are named
+# .jpeg while containing PNG bytes (89504e47). Preview, Windows Photos and most
+# portals trust the extension, try to decode JPEG, and report the file as
+# damaged. The standard photo escapes this only because it goes through
+# resize_image_to_kb(), which is a real JPEG encoder.
+#
+# Fix: pick the format from the output path's extension.
+#
+# Safe for every caller: the only ones that consume the returned BYTES are in
+# deploy_api.py, and all of them pass output_image_path=None, which still yields
+# PNG exactly as before. Only writes to a .jpg/.jpeg path change behaviour.
+#
+# NOTE: demo/processor.py does `from hivision.utils import save_image_dpi_to_bytes`,
+# so it holds its own reference - patching hivision.utils alone would be a no-op.
+# Both bindings are replaced below.
+try:
+    import io as _io
+    from PIL import Image as _PIL2
+    import hivision.utils as _hutils
+    import demo.processor as _dproc
+
+    def _save_image_dpi_to_bytes(image, output_image_path=None, dpi=300):
+        im = _PIL2.fromarray(image) if not isinstance(image, _PIL2.Image) else image
+        ext = os.path.splitext(output_image_path)[1].lower() if output_image_path else ""
+        if ext in (".jpg", ".jpeg"):
+            # JPEG cannot carry an alpha channel; RGBA would raise on save.
+            if im.mode != "RGB":
+                im = im.convert("RGB")
+            buf = _io.BytesIO()
+            im.save(buf, format="JPEG", dpi=(dpi, dpi), quality=95, subsampling=0)
+        else:
+            buf = _io.BytesIO()
+            im.save(buf, format="PNG", dpi=(dpi, dpi))
+        data = buf.getvalue()
+        if output_image_path:
+            with open(output_image_path, "wb") as fh:
+                fh.write(data)
+        return data
+
+    _hutils.save_image_dpi_to_bytes = _save_image_dpi_to_bytes
+    _dproc.save_image_dpi_to_bytes = _save_image_dpi_to_bytes
+    print("[launch] patched save_image_dpi_to_bytes: file format now follows the "
+          "extension (fixes corrupt .jpeg layout/HD downloads)", flush=True)
+except Exception as exc:  # noqa: BLE001 - never block startup over this
+    print("[launch] WARNING: could not patch save_image_dpi_to_bytes (%s). "
+          "Layout/HD downloads named .jpeg will contain PNG data." % exc, flush=True)
+
+# Upstream bug: the "Set KB size" control inflates files with null padding.
+#
+# hivision/utils.py:78-84 resize_image_to_kb() compresses until the JPEG fits
+# the target, then PADS it back up to exactly target_size_kb * 1024:
+#
+#     padding_size = int((target_size_kb * 1024) - len(img_byte_arr.getvalue()))
+#     padding = b"\x00" * padding_size
+#     img_byte_arr.write(padding)
+#
+# Measured on a 630x810 Passport Seva photo at a 240 KB target: the real JPEG is
+# 85,289 bytes and the file written is 245,760 bytes - 160,471 bytes of zeros
+# appended AFTER the JPEG end-of-image marker, 65% of the file.
+#
+# Two problems. The file is ~3x larger than the image needs, sitting right at
+# whatever limit was requested instead of comfortably under it. And the trailing
+# bytes are garbage past EOI: desktop viewers ignore them, but strict server-side
+# validators (such as the Passport Seva upload check) reject the file.
+#
+# Padding only makes sense for a portal that enforces a MINIMUM size. Every
+# portal this deployment targets enforces a maximum, so treat the value as a
+# ceiling: compress to fit, then stop. To restore upstream's exact-size
+# behaviour, delete this block.
+#
+# NOTE: demo/processor.py imports resize_image_to_kb directly, so both bindings
+# must be replaced or the patch is a no-op.
+try:
+    import io as _io3
+    import numpy as _np3
+    from PIL import Image as _PIL3
+    import hivision.utils as _hutils3
+    import demo.processor as _dproc3
+
+    def _resize_image_to_kb(input_image, output_image_path=None,
+                            target_size_kb=100, dpi=300):
+        if isinstance(input_image, _np3.ndarray):
+            img = _PIL3.fromarray(input_image)
+        elif isinstance(input_image, _PIL3.Image):
+            img = input_image
+        else:
+            raise ValueError("input_image must be a NumPy array or PIL Image.")
+
+        if img.mode != "RGB":
+            img = img.convert("RGB")
+
+        target_bytes = int(target_size_kb) * 1024
+        quality = 95
+        while True:
+            buf = _io3.BytesIO()
+            img.save(buf, format="JPEG", quality=quality, dpi=(dpi, dpi))
+            data = buf.getvalue()
+            if len(data) <= target_bytes or quality <= 1:
+                break
+            quality = max(1, quality - 5)
+
+        # Deliberately no padding - the file stays exactly as large as the
+        # encoded image, and ends at its EOI marker with nothing after it.
+        if output_image_path:
+            with open(output_image_path, "wb") as fh:
+                fh.write(data)
+        return data
+
+    _hutils3.resize_image_to_kb = _resize_image_to_kb
+    _dproc3.resize_image_to_kb = _resize_image_to_kb
+    print("[launch] patched resize_image_to_kb: KB value is now a ceiling, no "
+          "null padding appended (fixes portal size/validation rejections)",
+          flush=True)
+except Exception as exc:  # noqa: BLE001 - never block startup over this
+    print("[launch] WARNING: could not patch resize_image_to_kb (%s). Output "
+          "will be padded with nulls to exactly the requested KB." % exc, flush=True)
+
 # run_name="__main__" so app.py's `if __name__ == "__main__"` block executes,
 # and run_path sets __file__ to _APP so app.py's root_dir resolves to /app.
 runpy.run_path(_APP, run_name="__main__")
